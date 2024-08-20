@@ -1,3 +1,127 @@
-#include<Arduino.h>
-#include <diver/adc.h>
+#include <Arduino.h>
 #include<stdint.h>
+#include <driver/adc.h>
+#include <config.h>
+//incluir librería de adafruit desde platform.io
+
+int width=10;
+#define ADC_PIN 25
+
+#define P_1 18
+#define P_2 20
+#define a 12
+#define b 13
+#define c 14
+#define d 18
+#define e 19
+#define f 21
+#define g 25
+#define control1_PIN 2
+#define control2_PIN 4
+int tabla_S[] = {
+    0b00111111, // 0
+    0b00000110, // 1
+    0b01011011, // 2
+    0b01001111, // 3
+    0b01100110, // 4
+    0b01101101, // 5
+    0b01111101, // 6
+    0b00000111, // 7
+    0b01111111, // 8
+    0b01101111, // 9
+    0b01110111, // 10(A)
+    0b01111100, // 11(B)
+    0b00111001, // 12(C)
+    0b01011110, // 13(D)
+    0b01111001, // 14(E)
+    0b01110001  // 15(F)
+    
+};
+/*int tabla_b[] = {
+    0b0000,  // 0 en binario
+    0b0001,  // 1 en binario
+    0b0010,  // 2 en binario
+    0b0011,  // 3 en binario
+    0b0100,  // 4 en binario
+    0b0101,  // 5 en binario
+    0b0110,  // 6 en binario
+    0b0111,  // 7 en binario
+    0b1000,  // 8 en binario
+    0b1001,  // 9 en binario
+    0b1010,  // 10 en binario
+    0b1011,  // 11 en binario
+    0b1100,  // 12 en binario
+    0b1101,  // 13 en binario
+    0b1110,  // 14 en binario
+    0b1111   // 15 en binario
+};*/
+int mapa1;
+int mapa2;
+
+void ADC1_init();//Declaramos la función de inicio ADC para P1
+void ADC2_init();//Declaramos la función de inicio ADC para P2
+void Dispnum();
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  pinMode(a,OUTPUT);
+  pinMode(b,OUTPUT);
+  pinMode(c,OUTPUT);
+  pinMode(d,OUTPUT);
+  pinMode(e,OUTPUT);
+  pinMode(f,OUTPUT);
+  pinMode(g,OUTPUT);
+  pinMode(control1_PIN,OUTPUT);
+  pinMode(control2_PIN,OUTPUT);
+  pinMode(P_1, INPUT);
+  pinMode(P_2, INPUT);
+
+  ADC1_init();
+  ADC2_init();
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  delay(10); // this speeds up the simulation
+  mapa1 = analogReadMilliVolts(uint8_t P_1);
+  mapa2=analogReadMilliVolts(uint8_t P_2);
+  P1_val= map(mapa1, 0, 3300, 0, 15);
+  P2_val= map(mapa2, 0, 3300, 0, 15);
+
+  digitalWrite(control1_PIN,HIGH);
+  digitalWrite(control2_PIN, LOW);
+  Dispnum(mapa1);
+  delay(100);
+
+  digitalWrite(control2_PIN,HIGH);
+  digitalWrite(control1_PIN, LOW);
+  Dispnum(mapa2);
+  delay(100);
+
+
+}
+
+void ADC1_init(void){
+  analogSetWidth(width);
+  analogSetVRefPin(ADC_PIN);
+ // mapa1 = analogReadMilliVolts(uint8_t P1);
+
+}
+void ADC2_init(void){
+  analogSetWidth(width);
+  analogSetVRefPin(ADC_PIN);
+ // mapa2=analogReadMilliVolts(uint8_t P2);
+}
+
+void Dispnum(int numero){
+  int valor = tabla_S[numero];
+    digitalWrite(a, valor & 0b00000001);
+    digitalWrite(b, valor & 0b00000010);
+    digitalWrite(c, valor & 0b00000100);
+    digitalWrite(d, valor & 0b00001000);
+    digitalWrite(e, valor & 0b00010000);
+    digitalWrite(f, valor & 0b00100000);
+    digitalWrite(g, valor & 0b01000000);
+
+}
