@@ -1,127 +1,251 @@
 #include <Arduino.h>
-#include<stdint.h>
+
+#include "config.h"
+#include "Adafruit_MQTT.h"
+#include <stdint.h>
 #include <driver/adc.h>
-#include <config.h>
-//incluir librería de adafruit desde platform.io
+void display(uint8_t valorPot);
+void IRAM_ATTR ada_ISR(void);
+//indicamos los pines de los potenciómetros y segmentos del display
 
-int width=10;
-#define ADC_PIN 25
+#define Pot_1 34
+#define Pot_2 35
+#define pinA 13
+#define pinB 12
+#define pinC 27
+#define pinD 26
+#define pinE 25
+#define pinF 33
+#define pinG 32
+#define boton 15
 
-#define P_1 18
-#define P_2 20
-#define a 12
-#define b 13
-#define c 14
-#define d 18
-#define e 19
-#define f 21
-#define g 25
-#define control1_PIN 2
-#define control2_PIN 4
-int tabla_S[] = {
-    0b00111111, // 0
-    0b00000110, // 1
-    0b01011011, // 2
-    0b01001111, // 3
-    0b01100110, // 4
-    0b01101101, // 5
-    0b01111101, // 6
-    0b00000111, // 7
-    0b01111111, // 8
-    0b01101111, // 9
-    0b01110111, // 10(A)
-    0b01111100, // 11(B)
-    0b00111001, // 12(C)
-    0b01011110, // 13(D)
-    0b01111001, // 14(E)
-    0b01110001  // 15(F)
-    
-};
-/*int tabla_b[] = {
-    0b0000,  // 0 en binario
-    0b0001,  // 1 en binario
-    0b0010,  // 2 en binario
-    0b0011,  // 3 en binario
-    0b0100,  // 4 en binario
-    0b0101,  // 5 en binario
-    0b0110,  // 6 en binario
-    0b0111,  // 7 en binario
-    0b1000,  // 8 en binario
-    0b1001,  // 9 en binario
-    0b1010,  // 10 en binario
-    0b1011,  // 11 en binario
-    0b1100,  // 12 en binario
-    0b1101,  // 13 en binario
-    0b1110,  // 14 en binario
-    0b1111   // 15 en binario
-};*/
-int mapa1;
-int mapa2;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+volatile unsigned long debounce1 = 0;
 
-void ADC1_init();//Declaramos la función de inicio ADC para P1
-void ADC2_init();//Declaramos la función de inicio ADC para P2
-void Dispnum();
+//pines para encender el display indicado
+#define display1 21
+#define display2 22
+
+uint8_t valorPot1, valorPot2, mapeo1, mapeo2;
+int multiplic, envio;
+// set up the 'counter' feed
+AdafruitIO_Feed *p1 = io.feed("LAB5-POT1");
+AdafruitIO_Feed *p2 = io.feed("LAB5-POT2");
+AdafruitIO_Feed *multi = io.feed("LAB5-Multi");
+
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
-  pinMode(a,OUTPUT);
-  pinMode(b,OUTPUT);
-  pinMode(c,OUTPUT);
-  pinMode(d,OUTPUT);
-  pinMode(e,OUTPUT);
-  pinMode(f,OUTPUT);
-  pinMode(g,OUTPUT);
-  pinMode(control1_PIN,OUTPUT);
-  pinMode(control2_PIN,OUTPUT);
-  pinMode(P_1, INPUT);
-  pinMode(P_2, INPUT);
+  while(! Serial);
+  Serial.print("Connecting to Adafruit IO");
+  io.connect();
+  while(io.status() < AIO_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println();
+  Serial.println(io.statusText());
 
-  ADC1_init();
-  ADC2_init();
+  pinMode(pinA, OUTPUT);
+  pinMode(pinB, OUTPUT);
+  pinMode(pinC, OUTPUT);
+  pinMode(pinD, OUTPUT);
+  pinMode(pinE, OUTPUT);
+  pinMode(pinF, OUTPUT);
+  pinMode(pinG, OUTPUT);
+  pinMode(display1, OUTPUT);
+  pinMode(display2, OUTPUT);
+  pinMode(Pot_1, INPUT);
+  pinMode(Pot_2, INPUT);
+
+  attachInterrupt(digitalPinToInterrupt(boton), ada_ISR, RISING);
+  pinMode(boton, INPUT_PULLDOWN);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  delay(10); // this speeds up the simulation
-  mapa1 = analogReadMilliVolts(uint8_t P_1);
-  mapa2=analogReadMilliVolts(uint8_t P_2);
-  P1_val= map(mapa1, 0, 3300, 0, 15);
-  P2_val= map(mapa2, 0, 3300, 0, 15);
+  io.run();
 
-  digitalWrite(control1_PIN,HIGH);
-  digitalWrite(control2_PIN, LOW);
-  Dispnum(mapa1);
-  delay(100);
+  valorPot1 = analogRead(Pot_1);
+  valorPot2 = analogRead(Pot_2);
 
-  digitalWrite(control2_PIN,HIGH);
-  digitalWrite(control1_PIN, LOW);
-  Dispnum(mapa2);
-  delay(100);
+  mapeo1 = map(valorPot1, 0, 255, 0, 15);
+  mapeo2 = map(valorPot2, 0, 255, 0, 15);
+  multiplic = mapeo2*mapeo1;
 
+  digitalWrite(display1, HIGH);
+  digitalWrite(display2, LOW);
+  display(mapeo1);
+  delay(20);
+  
+  digitalWrite(display2, HIGH);
+  digitalWrite(display1, LOW);
+  display(mapeo2);
+  delay(10);
 
+  if(envio == 1){
+    p1->save(mapeo1);
+    p2->save(mapeo2);
+    multi->save(multiplic);
+    delay(3000);
+    envio = 0;
+  }
+  
 }
-
-void ADC1_init(void){
-  analogSetWidth(width);
-  analogSetVRefPin(ADC_PIN);
- // mapa1 = analogReadMilliVolts(uint8_t P1);
-
+void IRAM_ATTR ada_ISR(void){
+  unsigned long currentTime = millis();
+  if ((currentTime - debounce1) > 50) {
+    portENTER_CRITICAL_ISR(&mux);
+    envio = 1;
+    portEXIT_CRITICAL_ISR(&mux);
+    debounce1 = currentTime;
+  }
 }
-void ADC2_init(void){
-  analogSetWidth(width);
-  analogSetVRefPin(ADC_PIN);
- // mapa2=analogReadMilliVolts(uint8_t P2);
-}
-
-void Dispnum(int numero){
-  int valor = tabla_S[numero];
-    digitalWrite(a, valor & 0b00000001);
-    digitalWrite(b, valor & 0b00000010);
-    digitalWrite(c, valor & 0b00000100);
-    digitalWrite(d, valor & 0b00001000);
-    digitalWrite(e, valor & 0b00010000);
-    digitalWrite(f, valor & 0b00100000);
-    digitalWrite(g, valor & 0b01000000);
-
+void display(uint8_t valorPot){
+  switch (valorPot)
+  {
+  case 0:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, LOW);
+    break;
+  case 1:
+    digitalWrite(pinA, LOW);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, LOW);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, LOW);
+    digitalWrite(pinG, LOW);
+    break;
+  case 2:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, LOW);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, LOW);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 3:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, LOW);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 4:
+    digitalWrite(pinA, LOW);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, LOW);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 5:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 6:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 7:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, LOW);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, LOW);
+    digitalWrite(pinG, LOW);
+    break;
+  case 8:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 9:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, LOW);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 10:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, LOW);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 11:
+    digitalWrite(pinA, LOW);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 12:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, LOW);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, LOW);
+    break;
+  case 13:
+    digitalWrite(pinA, LOW);
+    digitalWrite(pinB, HIGH);
+    digitalWrite(pinC, HIGH);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, LOW);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 14:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, LOW);
+    digitalWrite(pinD, HIGH);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  case 15:
+    digitalWrite(pinA, HIGH);
+    digitalWrite(pinB, LOW);
+    digitalWrite(pinC, LOW);
+    digitalWrite(pinD, LOW);
+    digitalWrite(pinE, HIGH);
+    digitalWrite(pinF, HIGH);
+    digitalWrite(pinG, HIGH);
+    break;
+  }
 }
