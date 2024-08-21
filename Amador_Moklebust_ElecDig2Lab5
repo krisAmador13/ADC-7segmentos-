@@ -4,8 +4,11 @@
 #include "Adafruit_MQTT.h"
 #include <stdint.h>
 #include <driver/adc.h>
+//llamamos las funciones e interrupciones
 void display(uint8_t valorPot);
 void IRAM_ATTR ada_ISR(void);
+void mapeo();
+
 //indicamos los pines de los potenciómetros y segmentos del display
 //Definimos los pines de entradas y salidas 
 #define Pot_1 34
@@ -65,13 +68,7 @@ void setup() {
 
 void loop() {
   io.run();//Se inicia la comunicación con adafruit 
-//Se leen los valores analógicos de los potenciómetros (ADC)
-  valorPot1 = analogRead(Pot_1);
-  valorPot2 = analogRead(Pot_2);
-//Se mapean los potenciómetros para que solo tome determiados valores
-  mapeo1 = map(valorPot1, 0, 255, 0, 15);
-  mapeo2 = map(valorPot2, 0, 255, 0, 15);
-  multiplic = mapeo2*mapeo1;
+
 //Se hace el multiplexado de los displays para mostrar los valores 
   digitalWrite(display1, HIGH);
   digitalWrite(display2, LOW);
@@ -82,8 +79,10 @@ void loop() {
   digitalWrite(display1, LOW);
   display(mapeo2);
   delay(10);
-//Se envían los datos de los potenciómetros a adafruit 
+//Se envían los datos de los potenciómetros a adafruit y se llama la función del mapeo
   if(envio == 1){
+    mapeo();
+    delay(100);
     p1->save(mapeo1);
     p2->save(mapeo2);
     multi->save(multiplic);
@@ -91,6 +90,20 @@ void loop() {
     envio = 0;
   }
   
+}
+//Funcion del mapeo, se encarga de recibir los valores de los potenciómetros e indicarlos en el monitor serial (solo como método de debuggeo).
+//se asigna valor a la variable de la multiplicación
+void mapeo(){
+  valorPot1 = analogRead(Pot_1);
+  valorPot2 = analogRead(Pot_2);
+
+  mapeo1 = map(valorPot1, 0, 255, 0, 15);
+  mapeo2 = map(valorPot2, 0, 255, 0, 15);
+  multiplic = mapeo2*mapeo1;
+  Serial.print("\n");
+  Serial.print(mapeo1);
+  Serial.print("\n");
+  Serial.print(mapeo2);
 }
 //Función de interrupción de botón 
 void IRAM_ATTR ada_ISR(void){
