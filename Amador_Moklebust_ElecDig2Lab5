@@ -1,5 +1,5 @@
+//Incluimos las librerías necesarias 
 #include <Arduino.h>
-
 #include "config.h"
 #include "Adafruit_MQTT.h"
 #include <stdint.h>
@@ -7,7 +7,7 @@
 void display(uint8_t valorPot);
 void IRAM_ATTR ada_ISR(void);
 //indicamos los pines de los potenciómetros y segmentos del display
-
+//Definimos los pines de entradas y salidas 
 #define Pot_1 34
 #define Pot_2 35
 #define pinA 13
@@ -18,7 +18,7 @@ void IRAM_ATTR ada_ISR(void);
 #define pinF 33
 #define pinG 32
 #define boton 15
-
+//Se establece la línea para poder iniciar la interrupción 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 volatile unsigned long debounce1 = 0;
 
@@ -35,6 +35,7 @@ AdafruitIO_Feed *multi = io.feed("LAB5-Multi");
 
 
 void setup() {
+//inicializamos la comunicación serial y el envio de datos a adafruit 
   Serial.begin(115200);
   while(! Serial);
   Serial.print("Connecting to Adafruit IO");
@@ -45,7 +46,7 @@ void setup() {
   }
   Serial.println();
   Serial.println(io.statusText());
-
+//Se establecen las entradas y las salidas 
   pinMode(pinA, OUTPUT);
   pinMode(pinB, OUTPUT);
   pinMode(pinC, OUTPUT);
@@ -57,21 +58,21 @@ void setup() {
   pinMode(display2, OUTPUT);
   pinMode(Pot_1, INPUT);
   pinMode(Pot_2, INPUT);
-
+//Se inicia la interrupción del botón 
   attachInterrupt(digitalPinToInterrupt(boton), ada_ISR, RISING);
   pinMode(boton, INPUT_PULLDOWN);
 }
 
 void loop() {
-  io.run();
-
+  io.run();//Se inicia la comunicación con adafruit 
+//Se leen los valores analógicos de los potenciómetros (ADC)
   valorPot1 = analogRead(Pot_1);
   valorPot2 = analogRead(Pot_2);
-
+//Se mapean los potenciómetros para que solo tome determiados valores
   mapeo1 = map(valorPot1, 0, 255, 0, 15);
   mapeo2 = map(valorPot2, 0, 255, 0, 15);
   multiplic = mapeo2*mapeo1;
-
+//Se hace el multiplexado de los displays para mostrar los valores 
   digitalWrite(display1, HIGH);
   digitalWrite(display2, LOW);
   display(mapeo1);
@@ -81,7 +82,7 @@ void loop() {
   digitalWrite(display1, LOW);
   display(mapeo2);
   delay(10);
-
+//Se envían los datos de los potenciómetros a adafruit 
   if(envio == 1){
     p1->save(mapeo1);
     p2->save(mapeo2);
@@ -91,6 +92,7 @@ void loop() {
   }
   
 }
+//Función de interrupción de botón 
 void IRAM_ATTR ada_ISR(void){
   unsigned long currentTime = millis();
   if ((currentTime - debounce1) > 50) {
@@ -100,6 +102,7 @@ void IRAM_ATTR ada_ISR(void){
     debounce1 = currentTime;
   }
 }
+//Función para mostrar los valores del potenciómetro en los displays en formato deciomal y hexagecimal 
 void display(uint8_t valorPot){
   switch (valorPot)
   {
