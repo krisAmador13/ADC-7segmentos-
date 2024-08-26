@@ -1,55 +1,99 @@
-//Incluimos las librerías necesarias 
 #include <Arduino.h>
 #include "config.h"
-#include "Adafruit_MQTT.h"
+//#include "Adafruit_MQTT.h"
 #include <stdint.h>
 #include <driver/adc.h>
-//llamamos las funciones e interrupciones
-void display(uint8_t valorPot);
-void IRAM_ATTR ada_ISR(void);
-void mapeo();
+#include "driver/ledc.h"
+#include "AdafruitIO_WiFi.h"
+//Definimos variables correspondientes a los PWM
+int res = 10;
+int freq = 50;
+#define PWM1_Pin 7
+#define PWM2_Pin 9
+#define PWM3_Pin 10
+#define PWM4_Pin 11
+//Definimos lo necesario para ejecutar ADAFRUIT
+AdafruitIO_Feed *termometro= io.feed("sensor");
+// Definimos los pines
+#define sensor_t 34
+#define bot_T 35
+#define LED_rojo 27
+#define LED_verde 25
+#define LED_anaranjado 33
+#define servo 2
+#define transistor 2
 
-//indicamos los pines de los potenciómetros y segmentos del display
-//Definimos los pines de entradas y salidas 
-#define Pot_1 34
-#define Pot_2 35
-#define pinA 13
-#define pinB 12
-#define pinC 27
-#define pinD 26
-#define pinE 25
-#define pinF 33
-#define pinG 32
-#define boton 15
-//Se establece la línea para poder iniciar la interrupción 
+// Declaramos variables para semaforo 
+float voltaje_T = 0;
+int valor_A = 0;
+float Temp = 0;
+float temperatura = 0;
+int decenas = 0, unidades = 0, decimal = 0; 
+
+//Establecemos las variables a usar para pasar datos al display de 7 segmentos 
+#define pinA 4
+#define pinF 2
+#define pinB 15
+#define pinD 22
+#define pinE 23
+#define pinC 18
+#define pinP 21
+#define pinG 5
+#define Disp_1 13
+#define Disp_2 12
+#define Disp_3 14
+int segments[10][7] = {
+  {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, LOW},  // 0
+  {LOW, HIGH, HIGH, LOW, LOW, LOW, LOW},      // 1
+  {HIGH, HIGH, LOW, HIGH, HIGH, LOW, HIGH},   // 2
+  {HIGH, HIGH, HIGH, HIGH, LOW, LOW, HIGH},   // 3
+  {LOW, HIGH, HIGH, LOW, LOW, HIGH, HIGH},    // 4
+  {HIGH, LOW, HIGH, HIGH, LOW, HIGH, HIGH},   // 5
+  {HIGH, LOW, HIGH, HIGH, HIGH, HIGH, HIGH},  // 6
+  {HIGH, HIGH, HIGH, LOW, LOW, LOW, LOW},     // 7
+  {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH}, // 8
+  {HIGH, HIGH, HIGH, HIGH, LOW, HIGH, HIGH}   // 9
+};
+int pins[7] = {pinA, pinB, pinC, pinD, pinE, pinF, pinG};
+
+// Se establece lo pertinente para poder iniciar la interrupción 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-volatile unsigned long debounce1 = 0;
+unsigned long bot_T_lastlL = 0;
+unsigned long t_rebote = 50;
+volatile int lectura = 0;
 
-//pines para encender el display indicado
-#define display1 21
-#define display2 22
-
-uint8_t valorPot1, valorPot2, mapeo1, mapeo2;
-int multiplic, envio;
-// set up the 'counter' feed
-AdafruitIO_Feed *p1 = io.feed("LAB5-POT1");
-AdafruitIO_Feed *p2 = io.feed("LAB5-POT2");
-AdafruitIO_Feed *multi = io.feed("LAB5-Multi");
-
+// Declaramos funciones 
+float Tem_lect();
+void IRAM_ATTR bot_T_ISR();
+void Temp_separada(float temperatura, int &decenas, int &unidades, int &decimal);
+void initPWM1();
+void initPWM2();
+void initPWM3();
+void initPWM4();
+void servo_F();
+void LEDS();
+void Disp_7seg(uint8_t valor);
 
 void setup() {
-//inicializamos la comunicación serial y el envio de datos a adafruit 
+  // Iniciamos comunicación serial 
   Serial.begin(115200);
   while(! Serial);
   Serial.print("Connecting to Adafruit IO");
+  // connect to io.adafruit.com
   io.connect();
-  while(io.status() < AIO_CONNECTED) {
+   while(io.status() < AIO_CONNECTED) {
     Serial.print(".");
     delay(500);
   }
+  // Vemos si nos conectamos 
   Serial.println();
   Serial.println(io.statusText());
-//Se establecen las entradas y las salidas 
+//Se establecen los pines de entradas y salidas//
+  pinMode(sensor_t, INPUT);
+  pinMode(bot_T, INPUT_PULLUP);
+  pinMode(LED_rojo,OUTPUT);
+  pinMode(LED_verde, OUTPUT);
+  pinMode(LED_anaranjado, OUTPUT);
   pinMode(pinA, OUTPUT);
   pinMode(pinB, OUTPUT);
   pinMode(pinC, OUTPUT);
@@ -57,211 +101,162 @@ void setup() {
   pinMode(pinE, OUTPUT);
   pinMode(pinF, OUTPUT);
   pinMode(pinG, OUTPUT);
-  pinMode(display1, OUTPUT);
-  pinMode(display2, OUTPUT);
-  pinMode(Pot_1, INPUT);
-  pinMode(Pot_2, INPUT);
-//Se inicia la interrupción del botón 
-  attachInterrupt(digitalPinToInterrupt(boton), ada_ISR, RISING);
-  pinMode(boton, INPUT_PULLDOWN);
+  pinMode(Disp_1,OUTPUT);
+  pinMode(Disp_2,OUTPUT);
+  pinMode(Disp_3,OUTPUT);
+  pinMode(transistor, OUTPUT);
+  digitalWrite(transistor, HIGH);
+//Iniciamos las funciones de PWM
+initPWM1();
+initPWM2();
+initPWM3();
+initPWM4();
+//Iniciamos la interrupción 
+attachInterrupt(digitalPinToInterrupt(bot_T), bot_T_ISR, RISING);
 }
 
 void loop() {
-  io.run();//Se inicia la comunicación con adafruit 
-
-//Se hace el multiplexado de los displays para mostrar los valores 
-  digitalWrite(display1, HIGH);
-  digitalWrite(display2, LOW);
-  display(mapeo1);
-  delay(20);
   
-  digitalWrite(display2, HIGH);
-  digitalWrite(display1, LOW);
-  display(mapeo2);
-  delay(10);
-//Se envían los datos de los potenciómetros a adafruit y se llama la función del mapeo
-  if(envio == 1){
-    mapeo();
-    delay(100);
-    p1->save(mapeo1);
-    p2->save(mapeo2);
-    multi->save(multiplic);
+    io.run();
+  lectura = digitalRead(bot_T);
+  //Serial.print(lectura); 
+  delay(150);
+  if (lectura == 1) {
+    Temp = Tem_lect();
+    //Envio de datos a adafruit 
+    Serial.print("sending -> ");
+    Serial.println(Temp);
+    termometro->save(Temp);
     delay(3000);
-    envio = 0;
+    Temp_separada(Temp, decenas, unidades, decimal); // Llamada a la función con parámetros por referencia
+    servo_F();//Se manda a llamar la función de comportamiento del servo para ser ejecutada
+    LEDS();//Se manda a llamar la función de comportamiento de los leds para ser ejecutada
+    lectura=0;
   }
-  
-}
-//Funcion del mapeo, se encarga de recibir los valores de los potenciómetros e indicarlos en el monitor serial (solo como método de debuggeo).
-//se asigna valor a la variable de la multiplicación
-void mapeo(){
-  valorPot1 = analogRead(Pot_1);
-  valorPot2 = analogRead(Pot_2);
+   //Serial.print(Temp);
+    //Serial.print(sensor_t);
+    Serial.print(lectura);
+    Serial.print("\n");
+    Serial.print( voltaje_T);
+    //Serial.print(decenas);
+    //Serial.print(unidades);
+    //Serial.print(decimal);
+    Serial.print("\n");
+    delay(100);
+    //Realizamos el multiplexado, escoges que queremos que se muestre en cada display 
+    digitalWrite(Disp_1, HIGH);
+    digitalWrite(Disp_2, LOW);
+    digitalWrite(Disp_3,LOW);
+    digitalWrite(pinP, LOW);
+    Disp_7seg(decenas);
+    delay(7);
 
-  mapeo1 = map(valorPot1, 0, 255, 0, 15);
-  mapeo2 = map(valorPot2, 0, 255, 0, 15);
-  multiplic = mapeo2*mapeo1;
-  Serial.print("\n");
-  Serial.print(mapeo1);
-  Serial.print("\n");
-  Serial.print(mapeo2);
+    digitalWrite(Disp_1, LOW);
+    digitalWrite(Disp_2, HIGH);
+    digitalWrite(Disp_3,LOW);
+    digitalWrite(pinP, LOW);
+    Disp_7seg(unidades);
+    delay(7);
+
+    if (decimal > 0 || decenas > 0) {  // Mostrar el decimal si es mayor a 0 o si hay decenas, si no hay el display no se encenderá 
+    digitalWrite(Disp_1, LOW);
+    digitalWrite(Disp_2, LOW);
+    digitalWrite(Disp_3, HIGH);
+    digitalWrite(pinP, HIGH);
+    Disp_7seg(decimal);
+    delay(7);
 }
-//Función de interrupción de botón 
-void IRAM_ATTR ada_ISR(void){
+}
+
+
+/*La función de temperatura nos permite leer el sensor y convertir sus valores a temperatura */
+float Tem_lect() {
+  int valor_A = random(320,400);
+  //analogRead(sensor_t);
+  voltaje_T = map(valor_A, 0, 4095, 320, 400);
+  temperatura = (voltaje_T)/10; 
+  return temperatura;
+}
+
+// Establecemos función de interrupción 
+/*En esta función establecemos que cuando se presione el botón la variable lectura tomará el valor de 1
+esto permite que mediante el uso del botón se activen ciertos componentes*/
+void IRAM_ATTR bot_T_ISR(void) {
   unsigned long currentTime = millis();
-  if ((currentTime - debounce1) > 50) {
+  if (currentTime - bot_T_lastlL > t_rebote) {
     portENTER_CRITICAL_ISR(&mux);
-    envio = 1;
+    lectura = 1;
+    Serial.println("Interrupción activada");
     portEXIT_CRITICAL_ISR(&mux);
-    debounce1 = currentTime;
+    bot_T_lastlL = currentTime;
   }
 }
-//Función para mostrar los valores del potenciómetro en los displays en formato deciomal y hexagecimal 
-void display(uint8_t valorPot){
-  switch (valorPot)
-  {
-  case 0:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, LOW);
-    break;
-  case 1:
-    digitalWrite(pinA, LOW);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, LOW);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, LOW);
-    digitalWrite(pinG, LOW);
-    break;
-  case 2:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, LOW);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, LOW);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 3:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, LOW);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 4:
-    digitalWrite(pinA, LOW);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, LOW);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 5:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 6:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 7:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, LOW);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, LOW);
-    digitalWrite(pinG, LOW);
-    break;
-  case 8:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 9:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, LOW);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 10:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, LOW);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 11:
-    digitalWrite(pinA, LOW);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 12:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, LOW);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, LOW);
-    break;
-  case 13:
-    digitalWrite(pinA, LOW);
-    digitalWrite(pinB, HIGH);
-    digitalWrite(pinC, HIGH);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, LOW);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 14:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, LOW);
-    digitalWrite(pinD, HIGH);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
-  case 15:
-    digitalWrite(pinA, HIGH);
-    digitalWrite(pinB, LOW);
-    digitalWrite(pinC, LOW);
-    digitalWrite(pinD, LOW);
-    digitalWrite(pinE, HIGH);
-    digitalWrite(pinF, HIGH);
-    digitalWrite(pinG, HIGH);
-    break;
+/*Temp_Separada es la función que nos permite tomar la temperatura leida
+y separarla en decenas, unidades y decimales para poder imprimir el valor en displays separados*/
+void Temp_separada(float temperatura, int &decenas, int &unidades, int &decimal) {
+  int parteEntera = (int)temperatura; // Extraer la parte entera de la temperatura
+  decimal = (int)((temperatura - parteEntera) * 10); // Extraer el primer decimal
+  decenas = parteEntera / 10; // Calcular las decenas
+  unidades = parteEntera % 10; // Calcular las unidades
+}
+/*Se establecen las funciones de PWM para enviar señal al motor servo y a los leds, se emplea una señal
+para cada salida utilizando los pines del 0 al 15*/
+void initPWM1(void){
+ledcSetup(PWM1_Pin, freq, res);//Establecemos la señal PWM para el servo 
+ledcAttachPin(servo, PWM1_Pin); //Le mandamos la señal de PWM al servo
+ledcWrite(PWM1_Pin,0);
+}
+void initPWM2(void){
+ledcSetup(PWM2_Pin, freq, res);//Establecemos la señal PWM para led
+ledcAttachPin(LED_rojo, PWM2_Pin); //Le mandamos la señal de PWM al led rojo 
+}
+void initPWM3(void){
+ledcSetup(PWM3_Pin, freq, res);//Establecemos la señal PWM para led
+ledcAttachPin(LED_verde, PWM3_Pin); //Le mandamos la señal de PWM al led verde
+}
+void initPWM4(void){
+ledcSetup(PWM4_Pin, freq, res);//Establecemos la señal PWM para led
+ledcAttachPin(LED_anaranjado, PWM4_Pin); //Le mandamos la señal de PWM al led azul 
+}
+/*La función servo delimita el comportamiento de la salida basado en determinadas condiciones, es decir
+dependiendo del valor qiue emita el sensor cambiará la posición del servo. Se definen determinados rangos para lograr esto */
+void servo_F(){
+  if (Temp < 37) {
+    ledcWrite(PWM1_Pin,27);   //El servo se moverá con un dutycicle de 27 si la temperatura es menor a 37 
+  } 
+  else if (Temp >= 37 && Temp < 37.5) {
+    ledcWrite(PWM1_Pin,77); //El servo se moverá con un dutycicle de 77 si la temperatura es mayor a 37 y  menor a 37.5 
+  } 
+  else if (Temp >= 37.5) {
+    ledcWrite(PWM1_Pin,128); //El servo se moverá con un dutycicle de 128 si la temperatura es mayor a 37.5
+}
+}
+/*La función LEDS funciona similar a la función servo_F delimitando el 
+encendido y apagado de las leds de acuerdo a las mismas condiciones establecidas para el servo*/
+void LEDS(){
+  if (Temp < 37) {    
+    ledcWrite(PWM2_Pin, 128);  // 50% ciclo de trabajo
+    ledcWrite(PWM3_Pin, 0);
+    ledcWrite(PWM4_Pin, 0);
+    
+  } else if (Temp >= 37 && Temp < 37.5) {
+    ledcWrite(PWM2_Pin, 0);
+    ledcWrite(PWM3_Pin, 250);
+    ledcWrite(PWM4_Pin, 0);
+    
+  } else if (Temp >= 37.5) {
+    ledcWrite(PWM2_Pin, 0);
+    ledcWrite(PWM3_Pin, 0);
+    ledcWrite(PWM4_Pin, 128);
+    
   }
 }
+/*La función Disp_7seg emplea un ciclo for para recorrer dos arreglos de delimitan el pin del display y el estado del mismo
+(encendido o apagado) para poder mostrar los datos leidos por el sensor*/
+ void Disp_7seg(uint8_t valor){
+  for (int i = 0; i < 7; i++) {
+    digitalWrite(pins[i], segments[valor][i]);
+  
+  }
+ }   
+
